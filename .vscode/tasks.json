@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build csopesy",
+      "type": "shell",
+      "command": "g++",
+      "args": ["-std=c++17", "-Wall", "-pthread", "-g",
+               "-o", "csopesy.exe", "Marquee.cpp"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+# Compiled binaries
+csopesy
+csopesy.exe
+*.o
+*.obj
+*.out
+a.out
+
+# VS Code cache (keep tasks.json and launch.json)
+.vscode/ipch/
+.vscode/*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
