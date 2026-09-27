@@ -4,10 +4,15 @@
 // Run Linux/Mac: ./csopesy
 // Run Windows: .\csopesy.exe
 
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
+#include <cstdlib>
+#include <deque>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 
