@@ -1,8 +1,10 @@
 // CSOPESY - Marquee Operator
 // Group 5
-// Compile: g++ -std=c++17 -Wall -pthread -o csopesy Marquee.cpp
+// Compile: g++ -std=c++17 -Wall -pthread -o csopesy.exe Marquee.cpp
 // Run Linux/Mac: ./csopesy
-// Run Windows: .\csopesy.exe
+// Run Windows:   .\csopesy.exe
+//
+// Reads config.txt at startup (to comply with the quiz)
 
 
 #include <atomic>
@@ -11,6 +13,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <deque>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -27,6 +30,7 @@
   #include <termios.h>
   #include <unistd.h>
 #endif
+
 
 // Terminal: non-blocking keyboard + ANSI escape support
 
@@ -90,13 +94,13 @@ namespace term {
 
 static std::mutex        g_textMutex;                  // protects g_marqueeText
 static std::string       g_marqueeText = "Hello CSOPESY";
-static std::atomic<int>  g_refreshMs{200};             // marquee refresh (set_speed)
+static std::atomic<int>  g_speedMs{200};               // marquee animation speed (set_speed)
 static std::atomic<int>  g_pollMs{10};                 // keyboard polling (set_poll)
 static std::atomic<bool> g_marqueeRunning{false};
 static std::atomic<bool> g_programDone{false};
 
 // Wakes the marquee thread early (start, stop, speed change, exit) so a long
-// refresh interval never makes the program feel frozen.
+// speed interval never makes the program feel frozen.
 static std::mutex              g_wakeMutex;
 static std::condition_variable g_wakeCv;
 static unsigned                g_wakeGen = 0;
@@ -104,6 +108,75 @@ static unsigned                g_wakeGen = 0;
 static void wakeMarquee() {
     { std::lock_guard<std::mutex> lk(g_wakeMutex); ++g_wakeGen; }
     g_wakeCv.notify_all();
+}
+
+
+// Configuration file loading (must be called before drawing the screen
+// and before starting the marquee thread).
+
+static std::string trimCopy(const std::string& s) {
+    const std::string ws = " \t\r\n";
+    std::size_t start = s.find_first_not_of(ws);
+    if (start == std::string::npos) return "";
+    std::size_t end = s.find_last_not_of(ws);
+    return s.substr(start, end - start + 1);
+}
+
+static bool parseIntStrict(const std::string& s, int minV, int maxV, int& out) {
+    if (s.empty()) return false;
+    try {
+        std::size_t pos = 0;
+        long v = std::stol(s, &pos);
+        if (pos != s.size()) return false;
+        if (v < minV || v > maxV) return false;
+        out = static_cast<int>(v);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static void loadConfig(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cout << "Note: " << filename
+                  << " not found. Using default values.\n";
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        line = trimCopy(line);
+        if (line.empty() || line[0] == '#') continue;
+
+        std::size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+
+        std::string key = trimCopy(line.substr(0, eq));
+        std::string val = trimCopy(line.substr(eq + 1));
+
+        if (key == "text") {
+            if (!val.empty()) {
+                std::lock_guard<std::mutex> lk(g_textMutex);
+                g_marqueeText = val;
+            }
+        }
+        else if (key == "speed") {
+            int ms;
+            if (parseIntStrict(val, 1, 100000, ms))
+                g_speedMs.store(ms);
+        }
+        else if (key == "poll") {
+            int ms;
+            if (parseIntStrict(val, 1, 1000, ms))
+                g_pollMs.store(ms);
+        }
+        else if (key == "running") {
+            g_marqueeRunning.store(val == "true" || val == "1" ||
+                                   val == "yes" || val == "on");
+        }
+    }
+    file.close();
 }
 
 
@@ -146,7 +219,7 @@ static void drawMarqueeLocked() {
 
 static void drawStatusLocked() {
     clearRow(ROW_STATUS);
-    std::cout << "Refresh: " << g_refreshMs.load() << " ms | Poll: " << g_pollMs.load()
+    std::cout << "Speed: " << g_speedMs.load() << " ms | Poll: " << g_pollMs.load()
               << " ms | Marquee: " << (g_marqueeRunning.load() ? "running" : "stopped");
 }
 
@@ -206,16 +279,18 @@ static void marqueeThread() {
             drawMarqueeLocked();
         }
 
-        // Sleep for the refresh interval, but wake immediately on start/stop/speed/exit.
+        // Sleep for the speed interval, but wake immediately on start/stop/speed/exit.
         std::unique_lock<std::mutex> lk(g_wakeMutex);
         unsigned gen = g_wakeGen;
-        auto wait = g_marqueeRunning.load() ? std::chrono::milliseconds(g_refreshMs.load())
+        auto wait = g_marqueeRunning.load() ? std::chrono::milliseconds(g_speedMs.load())
                                             : std::chrono::milliseconds(1000);
         g_wakeCv.wait_for(lk, wait, [&] { return g_programDone.load() || g_wakeGen != gen; });
     }
 }
 
+
 // Command interpreter
+
 static std::string trim(const std::string& s) {
     const std::string ws = " \t\r\n";
     std::size_t start = s.find_first_not_of(ws);
@@ -250,7 +325,7 @@ static bool execute(const std::string& rawLine) {
         logLine("start_marquee - starts the marquee animation");
         logLine("stop_marquee  - stops the marquee animation");
         logLine("set_text      - accepts a text input and displays it as a marquee");
-        logLine("set_speed     - sets the marquee animation refresh in milliseconds");
+        logLine("set_speed     - sets the marquee animation speed in milliseconds");
         logLine("set_poll      - sets the keyboard polling rate in milliseconds");
         logLine("exit          - terminates the console");
     }
@@ -279,9 +354,9 @@ static bool execute(const std::string& rawLine) {
         if (!toInt(args, ms)) {
             logLine("Error: invalid speed. Usage: set_speed <1-100000 milliseconds>");
         } else {
-            g_refreshMs.store(ms);
+            g_speedMs.store(ms);
             wakeMarquee();
-            logLine("Marquee refresh set to " + std::to_string(ms) + " ms.");
+            logLine("Marquee speed set to " + std::to_string(ms) + " ms.");
         }
     }
     else if (command == "set_poll") {
@@ -306,13 +381,19 @@ static bool execute(const std::string& rawLine) {
     return true;
 }
 
+
 // Main: keyboard polling loop
+
 static void shutdownTerminal() {
     std::cout << "\x1b[" << (ROW_PROMPT + 1) << ";1H\nTerminating console...\n" << std::flush;
     term::restore();
 }
 
 int main() {
+    // Read config.txt BEFORE drawing the screen and starting the marquee thread,
+    // so initial values are reflected immediately.
+    loadConfig("config.txt");
+
     term::init();
     std::signal(SIGINT, [](int) { term::restore(); std::_Exit(0); });
 

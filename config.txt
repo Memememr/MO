@@ -1,0 +1,8 @@
+# CSOPESY Marquee Operator - Runtime Configuration
+# Edit this file to change program behavior
+# During the quiz, only this file is allowed to be modified.
+
+text=Hello CSOPESY
+speed=200
+poll=10
+running=false

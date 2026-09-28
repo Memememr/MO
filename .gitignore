@@ -13,3 +13,6 @@ a.out
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Config backups (config.txt itself is tracked)
+config.txt.bak
